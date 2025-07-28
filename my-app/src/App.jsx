@@ -37,15 +37,24 @@ export default function ExcelCategorizer() {
   });
   const [minCosts, setMinCosts] = useState({}); // { normalizedCategory: value }
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'ascending' });
+  const [modalData, setModalData] = useState(null); // ✅ FIX: State for modal window
+  const cmToPx = cm => Math.round(cm * 37.7952755906);
 
 
   // Мемоизация цветовой схемы для категорий
   const categoryColors = useMemo(
     () => ({
-      айти: '#d1fae5',
-      телеком: '#cffafe',
-      'инф.структура': '#fef9c3',
-      прочее: '#fee2e2',
+      'айти': '#d1fae5', // green-100
+      'телеком': '#cffafe', // cyan-100
+      'инф.структура': '#fef9c3', // yellow-100
+      'строительство/ремонт': '#fef08a', // yellow-200
+      'оборудование': '#e5e7eb', // gray-200
+      'по/лицензии': '#ccfbf1', // teal-100
+      'транспорт/логистика': '#fed7aa', // orange-200
+      'канцтовары/хозтовары': '#fbcfe8', // pink-200
+      'одежда/сиз': '#dbeafe', // blue-200
+      'услуги (прочее)': '#e9d5ff', // purple-200
+      'прочее': '#fee2e2', // red-100
     }),
     [],
   );
@@ -172,7 +181,7 @@ export default function ExcelCategorizer() {
       Array.from({ length: Math.ceil(array.length / size) }, (_, i) =>
         array.slice(i * size, i * size + size),
       );
-    const chunks = chunkArray(data, 150);
+    const chunks = chunkArray(data, 100);
     setProgress({ current: 0, total: chunks.length });
 
     let allResults = [];
@@ -192,7 +201,11 @@ export default function ExcelCategorizer() {
       try {
         const response = await categorizeWithGemini(chunk);
         if (Array.isArray(response)) {
-          allResults.push(...response);
+          const mapped = response.map((res, idx) => ({
+            id: chunk[idx].id,            // глобальный id из исходного куска
+            category: res.category?.trim() || ''
+          }));
+          allResults.push(...mapped);
           setCategorizedData([...allResults]);
         }
         return true;
@@ -219,7 +232,6 @@ export default function ExcelCategorizer() {
   }, [categorizedData, originalSheetData]);
 
   const displayedData = useMemo(() => {
-    // ✅ FIX: Changed findHeader to only look for "стоимость"
     const findHeader = (aliases) => headers.find(h => aliases.some(alias => normalize(h) === alias));
     
     const columnNames = {
@@ -299,20 +311,21 @@ export default function ExcelCategorizer() {
 
     let filteredData = dataWithCategories;
 
+    /* ----------- фильтры регионов и категорий (как было) ------------ */
     if (filters.regions.length > 0) {
-      const regionColumn = headers.find((h) => normalize(h).includes('регион'));
+      const regionColumn = headers.find(h => normalize(h).includes('регион'));
       if (regionColumn) {
-        filteredData = filteredData.filter((row) => filters.regions.includes(row[regionColumn]));
+        filteredData = filteredData.filter(row =>
+          filters.regions.includes(row[regionColumn])
+        );
       }
     }
 
     if (filters.categories.length > 0) {
-      // ✅ FIX: Changed logic to only look for "стоимость"
-      const costColumn = headers.find((h) => normalize(h) === 'стоимость');
-
+      const costColumn = headers.find(h => normalize(h) === 'стоимость');
       const normalizedSelectedCats = filters.categories.map(normalize);
 
-      filteredData = filteredData.filter((row) => {
+      filteredData = filteredData.filter(row => {
         const rowCategory = normalize(row['Категория']);
         if (!normalizedSelectedCats.includes(rowCategory)) return false;
 
@@ -321,24 +334,42 @@ export default function ExcelCategorizer() {
           const cost = parseFloat(String(row[costColumn]).replace(/[^0-9.-]+/g, ''));
           return !isNaN(cost) && cost >= parseFloat(minCostForCategory);
         }
-
         return true;
       });
     }
-    
-    const dataForExport = filteredData.map(row => {
-        const newRow = {...row};
-        delete newRow.id;
-        return newRow;
-    });
 
+    /* ----------------- формируем worksheet ----------------- */
+    const dataForExport = filteredData.map(({ id, ...rest }) => rest);  // убираем id
     const newWs = XLSX.utils.json_to_sheet(dataForExport);
 
+    /* ====== 🆕 1. Ширина всех столбцов: 3.75 см ≈ 142 px ====== */
+    const colWidthPx = cmToPx(3.75);
+    newWs['!cols'] = Array.from(
+      { length: Object.keys(dataForExport[0] || {}).length },
+      () => ({ wpx: colWidthPx })
+    );
+
+    newWs['!cols'][costColIdx] = { wpx: cmToPx(2.0) }; // 4.5 см
+
+    /* ====== 🆕 2. Включаем wrapText, чтобы Excel сам тянул высоту ====== */
+    Object.keys(newWs).forEach(addr => {
+      if (addr[0] === '!') return;          // пропускаем служебные ключи
+      const cell = newWs[addr];
+      cell.s = {
+        ...(cell.s || {}),
+        alignment: { wrapText: true, vertical: 'top' }
+      };
+    });
+
+    /* ====== 🆕 3. (не задаём !rows.hpx) Excel сам подстроит высоту ====== */
+
+    /* ----------- переносим стиль из оригинального листа (как было) ---- */
     const originalWs = workbook.Sheets[selectedSheet];
-    ['!cols', '!rows', '!merges'].forEach((prop) => {
+    ['!merges'].forEach(prop => {           // колонки/строки мы уже задали вручную
       if (originalWs[prop]) newWs[prop] = originalWs[prop];
     });
 
+    /* ----------------- сохраняем файл ----------------- */
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, newWs, 'Отфильтрованные_данные');
     XLSX.writeFile(wb, `отфильтрованный_${fileName}`);
@@ -358,6 +389,7 @@ export default function ExcelCategorizer() {
     setMinCosts({});
     setFilters({ regions: [], categories: [] });
     setSortConfig({ key: null, direction: 'ascending' });
+    setModalData(null); // ✅ FIX: Reset modal state
     if (document.getElementById('file-upload-input')) {
         document.getElementById('file-upload-input').value = '';
     }
@@ -379,6 +411,15 @@ export default function ExcelCategorizer() {
       return <ArrowUp size={14} style={{ marginLeft: '4px' }} />;
     }
     return <ArrowDown size={14} style={{ marginLeft: '4px' }} />;
+  };
+
+  // ✅ FIX: Handlers for modal
+  const handleRowClick = (item) => {
+    setModalData(item);
+  };
+
+  const closeModal = () => {
+    setModalData(null);
   };
 
   // --- UI Компоненты ---
@@ -512,7 +553,6 @@ export default function ExcelCategorizer() {
       ),
     );
     
-    // ✅ FIX: Changed findHeader to only look for "стоимость"
     const findHeader = (aliases) => headers.find(h => aliases.some(alias => normalize(h) === alias));
     
     const columnNames = {
@@ -734,7 +774,7 @@ export default function ExcelCategorizer() {
             </thead>
             <tbody>
               {displayedData.map((item) => (
-                <tr key={item.id}>
+                <tr key={item.id} onClick={() => handleRowClick(item)} style={styles.trClickable}>
                   <td style={styles.td}>{item.id}</td>
                   <td style={styles.td}>{item.value}</td>
                   <td
@@ -763,6 +803,50 @@ export default function ExcelCategorizer() {
     );
   };
 
+  // ✅ FIX: Modal window component
+  const renderModal = () => {
+    if (!modalData) return null;
+
+    const findHeader = (aliases) => headers.find(h => aliases.some(alias => normalize(h) === alias)) || aliases[0];
+    
+    const displayTitles = {
+        value: selectedColumn || 'Значение',
+        category: 'Категория',
+        cost: findHeader(['стоимость']),
+        region: findHeader(['регион']),
+        adNumber: findHeader(['№ объявления']),
+        lotNumber: findHeader(['№ лота']),
+        method: findHeader(['способ проведения']),
+        source: findHeader(['источник']),
+        status: findHeader(['статус']),
+    };
+
+    return (
+        <div style={styles.modalOverlay} onClick={closeModal}>
+            <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+                <div style={styles.modalHeader}>
+                    <h3 style={styles.modalTitle}>Детали строки ID: {modalData.id}</h3>
+                    <button style={styles.modalCloseButton} onClick={closeModal}>&times;</button>
+                </div>
+                <div style={styles.modalBody}>
+                    {Object.entries(modalData).map(([key, value]) => {
+                        if (key === 'id' || value === undefined) return null;
+                        
+                        const title = displayTitles[key] || key;
+
+                        return (
+                            <div key={key} style={styles.modalDetailRow}>
+                                <strong style={styles.modalDetailKey}>{title}:</strong>
+                                <span style={styles.modalDetailValue}>{value}</span>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        </div>
+    );
+  };
+
   return (
     <div style={styles.container}>
       <header style={styles.header}>
@@ -778,6 +862,7 @@ export default function ExcelCategorizer() {
           renderConfiguration()}
         {isLoading && renderProgress()}
         {categorizedData.length > 0 && !isLoading && renderResults()}
+        {renderModal()}
       </main>
     </div>
   );
@@ -944,6 +1029,9 @@ const styles = {
     borderBottom: '1px solid #e5e7eb',
     color: '#374151',
     fontSize: '0.9rem',
+  },
+  trClickable: {
+    cursor: 'pointer',
   },
   errorBox: {
     margin: '0 0 1rem 0',
@@ -1123,5 +1211,72 @@ const styles = {
       opacity: 0.8,
       transform: 'translateY(-1px)'
     }
+  },
+  // ✅ FIX: Styles for modal
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+  },
+  modalContent: {
+    background: 'white',
+    padding: '2rem',
+    borderRadius: '12px',
+    boxShadow: '0 5px 15px rgba(0,0,0,0.3)',
+    width: '90%',
+    maxWidth: '600px',
+    maxHeight: '90vh',
+    overflowY: 'auto',
+  },
+  modalHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottom: '1px solid #e5e7eb',
+    paddingBottom: '1rem',
+    marginBottom: '1rem',
+  },
+  modalTitle: {
+    margin: 0,
+    fontSize: '1.25rem',
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  modalCloseButton: {
+    background: 'transparent',
+    border: 'none',
+    fontSize: '2rem',
+    fontWeight: 'bold',
+    lineHeight: 1,
+    color: '#6b7280',
+    cursor: 'pointer',
+  },
+  modalBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.75rem',
+  },
+  modalDetailRow: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 2fr',
+    gap: '1rem',
+    padding: '0.5rem 0',
+    borderBottom: '1px solid #f3f4f6',
+  },
+  modalDetailKey: {
+    fontWeight: '600',
+    color: '#4b5563',
+    textAlign: 'right',
+  },
+  modalDetailValue: {
+    color: '#111827',
+    wordBreak: 'break-word',
   }
 };
