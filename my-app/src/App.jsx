@@ -9,6 +9,9 @@ import {
   Download,
   List,
   ChevronsRight,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 
 // 🔧  Утилита: приведение строки к единому виду для сравнения
@@ -33,6 +36,8 @@ export default function ExcelCategorizer() {
     categories: [],
   });
   const [minCosts, setMinCosts] = useState({}); // { normalizedCategory: value }
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'ascending' });
+
 
   // Мемоизация цветовой схемы для категорий
   const categoryColors = useMemo(
@@ -54,6 +59,11 @@ export default function ExcelCategorizer() {
         Описание: 'Разработка ИИ',
         Стоимость: 5000,
         Категория: 'айти',
+        '№ объявления': 'AD-123',
+        '№ лота': 'LOT-456',
+        'Способ проведения': 'Аукцион',
+        Источник: 'Портал закупок',
+        Статус: 'Активна',
       },
       {
         Компания: 'Telecom Plus',
@@ -61,6 +71,11 @@ export default function ExcelCategorizer() {
         Описание: 'Сети 5G',
         Стоимость: 12000,
         Категория: 'телеком',
+        '№ объявления': 'AD-124',
+        '№ лота': 'LOT-457',
+        'Способ проведения': 'Конкурс',
+        Источник: 'Сайт компании',
+        Статус: 'Завершена',
       },
       {
         Компания: 'DataSecure',
@@ -68,6 +83,11 @@ export default function ExcelCategorizer() {
         Описание: 'Кибербезопасность',
         Стоимость: 7500,
         Категория: 'инф.структура',
+        '№ объявления': 'AD-125',
+        '№ лота': 'LOT-458',
+        'Способ проведения': 'Запрос котировок',
+        Источник: 'Гос. закупки',
+        Статус: 'Активна',
       },
     ];
 
@@ -188,58 +208,133 @@ export default function ExcelCategorizer() {
     }
   };
 
-  const exportToExcel = () => {
-    if (!workbook || !originalSheetData.length) return;
-
-    const originalWs = workbook.Sheets[selectedSheet];
-    const categoryMap = new Map(categorizedData.map((item) => [item.id, item.category]));
-
-    let dataWithCategories = originalSheetData.map((row, index) => ({
+  const dataWithCategories = useMemo(() => {
+    if (categorizedData.length === 0) return [];
+    const categoryMap = new Map(categorizedData.map(item => [item.id, item.category]));
+    return originalSheetData.map((row, index) => ({
       ...row,
+      id: index + 1,
       Категория: categoryMap.get(index + 1) || '',
     }));
+  }, [categorizedData, originalSheetData]);
+
+  const displayedData = useMemo(() => {
+    // ✅ FIX: Changed findHeader to only look for "стоимость"
+    const findHeader = (aliases) => headers.find(h => aliases.some(alias => normalize(h) === alias));
+    
+    const columnNames = {
+      cost: findHeader(['стоимость']),
+      region: findHeader(['регион']),
+      adNumber: findHeader(['№ объявления']),
+      lotNumber: findHeader(['№ лота']),
+      method: findHeader(['способ проведения']),
+      source: findHeader(['источник']),
+      status: findHeader(['статус']),
+    };
 
     let filteredData = dataWithCategories;
 
-    // Фильтр по регионам
+    if (filters.regions.length > 0 && columnNames.region) {
+      filteredData = filteredData.filter((row) => filters.regions.includes(row[columnNames.region]));
+    }
+
+    if (filters.categories.length > 0) {
+      const normalizedSelectedCats = filters.categories.map(normalize);
+      filteredData = filteredData.filter((row) => {
+        const rowCategory = normalize(row['Категория']);
+        if (!normalizedSelectedCats.includes(rowCategory)) return false;
+
+        const minCostForCategory = minCosts[rowCategory];
+        if (minCostForCategory && columnNames.cost) {
+          const costValue = row[columnNames.cost];
+          if (costValue === null || costValue === undefined) return false;
+          const cost = parseFloat(String(costValue).replace(/[^0-9.-]+/g, ''));
+          const minCost = parseFloat(minCostForCategory);
+          if (isNaN(cost) || isNaN(minCost)) return false;
+          return cost >= minCost;
+        }
+        return true;
+      });
+    }
+    
+    let mappedData = filteredData.map(row => ({
+      id: row.id,
+      value: row[selectedColumn],
+      category: row['Категория'],
+      cost: columnNames.cost ? row[columnNames.cost] : undefined,
+      region: columnNames.region ? row[columnNames.region] : undefined,
+      adNumber: columnNames.adNumber ? row[columnNames.adNumber] : undefined,
+      lotNumber: columnNames.lotNumber ? row[columnNames.lotNumber] : undefined,
+      method: columnNames.method ? row[columnNames.method] : undefined,
+      source: columnNames.source ? row[columnNames.source] : undefined,
+      status: columnNames.status ? row[columnNames.status] : undefined,
+    }));
+
+    if (sortConfig.key) {
+      mappedData.sort((a, b) => {
+        let aValue = a[sortConfig.key];
+        let bValue = b[sortConfig.key];
+        
+        if (sortConfig.key === 'cost') {
+          aValue = parseFloat(String(aValue).replace(/[^0-9.-]+/g, '')) || 0;
+          bValue = parseFloat(String(bValue).replace(/[^0-9.-]+/g, '')) || 0;
+        }
+
+        if (aValue < bValue) {
+          return sortConfig.direction === 'ascending' ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return sortConfig.direction === 'ascending' ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+
+    return mappedData;
+  }, [dataWithCategories, filters, minCosts, headers, selectedColumn, sortConfig]);
+
+
+  const exportToExcel = () => {
+    if (!workbook || !originalSheetData.length) return;
+
+    let filteredData = dataWithCategories;
+
     if (filters.regions.length > 0) {
-      const regionColumn = headers.find((h) =>
-        ['регион', 'region', 'город', 'city'].some((term) => normalize(h).includes(term)),
-      );
+      const regionColumn = headers.find((h) => normalize(h).includes('регион'));
       if (regionColumn) {
         filteredData = filteredData.filter((row) => filters.regions.includes(row[regionColumn]));
       }
     }
 
-    // Фильтр по категориям и минимальной стоимости
     if (filters.categories.length > 0) {
-      const costColumn = headers.find((h) =>
-        ['стоимость', 'cost', 'цена', 'price', 'сумма', 'amount', 'total'].some((term) =>
-          normalize(h).includes(term),
-        ),
-      );
+      // ✅ FIX: Changed logic to only look for "стоимость"
+      const costColumn = headers.find((h) => normalize(h) === 'стоимость');
 
       const normalizedSelectedCats = filters.categories.map(normalize);
 
       filteredData = filteredData.filter((row) => {
         const rowCategory = normalize(row['Категория']);
-
-        // 1) строка должна принадлежать выбранной категории
         if (!normalizedSelectedCats.includes(rowCategory)) return false;
 
-        // 2) если для категории задан фильтр стоимости — применяем
         const minCostForCategory = minCosts[rowCategory];
         if (minCostForCategory && costColumn) {
           const cost = parseFloat(String(row[costColumn]).replace(/[^0-9.-]+/g, ''));
           return !isNaN(cost) && cost >= parseFloat(minCostForCategory);
         }
 
-        return true; // если фильтра по стоимости нет
+        return true;
       });
     }
+    
+    const dataForExport = filteredData.map(row => {
+        const newRow = {...row};
+        delete newRow.id;
+        return newRow;
+    });
 
-    const newWs = XLSX.utils.json_to_sheet(filteredData);
+    const newWs = XLSX.utils.json_to_sheet(dataForExport);
 
+    const originalWs = workbook.Sheets[selectedSheet];
     ['!cols', '!rows', '!merges'].forEach((prop) => {
       if (originalWs[prop]) newWs[prop] = originalWs[prop];
     });
@@ -261,9 +356,29 @@ export default function ExcelCategorizer() {
     setError('');
     setProgress({ current: 0, total: 0 });
     setMinCosts({});
+    setFilters({ regions: [], categories: [] });
+    setSortConfig({ key: null, direction: 'ascending' });
     if (document.getElementById('file-upload-input')) {
         document.getElementById('file-upload-input').value = '';
     }
+  };
+  
+  const requestSort = (key) => {
+    let direction = 'ascending';
+    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+      direction = 'descending';
+    }
+    setSortConfig({ key, direction });
+  };
+  
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key) {
+      return <ArrowUpDown size={14} style={{ opacity: 0.5, marginLeft: '4px' }} />;
+    }
+    if (sortConfig.direction === 'ascending') {
+      return <ArrowUp size={14} style={{ marginLeft: '4px' }} />;
+    }
+    return <ArrowDown size={14} style={{ marginLeft: '4px' }} />;
   };
 
   // --- UI Компоненты ---
@@ -389,21 +504,26 @@ export default function ExcelCategorizer() {
         originalSheetData
           .map((row) => {
             const regionKey = Object.keys(row).find((key) =>
-              ['регион', 'region', 'город', 'city'].some((term) =>
-                normalize(key).includes(term),
-              ),
+              normalize(key).includes('регион'),
             );
             return regionKey ? row[regionKey] : null;
           })
           .filter(Boolean),
       ),
     );
-
-    const costColumnName = headers.find(h =>
-        ['стоимость', 'cost', 'цена', 'price'].some(term =>
-            normalize(h).includes(term)
-        )
-    );
+    
+    // ✅ FIX: Changed findHeader to only look for "стоимость"
+    const findHeader = (aliases) => headers.find(h => aliases.some(alias => normalize(h) === alias));
+    
+    const columnNames = {
+      cost: findHeader(['стоимость']),
+      region: findHeader(['регион']),
+      adNumber: findHeader(['№ объявления']),
+      lotNumber: findHeader(['№ лота']),
+      method: findHeader(['способ проведения']),
+      source: findHeader(['источник']),
+      status: findHeader(['статус']),
+    };
 
     const handleMinCostChange = (category, value) => {
       setMinCosts((prev) => ({ ...prev, [normalize(category)]: value }));
@@ -429,11 +549,7 @@ export default function ExcelCategorizer() {
         <div style={styles.filterSection}>
           <h3 style={styles.filterTitle}>Фильтровать перед скачиванием:</h3>
 
-          {headers.some((header) =>
-            ['регион', 'region', 'город', 'city'].some((term) =>
-              normalize(header).includes(term),
-            ),
-          ) && (
+          {columnNames.region && (
             <div style={styles.filterGroup}>
               <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px'}}>
                 <label style={styles.filterLabel}>Регионы:</label>
@@ -485,9 +601,9 @@ export default function ExcelCategorizer() {
             </select>
           </div>
 
-          {costColumnName && filters.categories.length > 0 && (
+          {columnNames.cost && filters.categories.length > 0 && (
             <div style={styles.costFiltersContainer}>
-                <h4 style={styles.filterLabel}>Минимальная стоимость (для столбца "{costColumnName}"):</h4>
+                <h4 style={styles.filterLabel}>Минимальная стоимость (для столбца "{columnNames.cost}"):</h4>
                 {filters.categories.map(category => (
                     <div key={category} style={styles.costFilterItem}>
                         <label style={styles.costFilterLabel}>{category}:</label>
@@ -560,10 +676,10 @@ export default function ExcelCategorizer() {
               <div style={styles.statItem}>
                 <span style={styles.statLabel}>Всего строк:</span>
                 <span style={styles.statValue}>
-                  {categorizedData.length}
+                  {displayedData.length}
                   <span style={styles.statSubtext}>
                     {' '}
-                    (из {originalSheetData.length})
+                    (из {categorizedData.length})
                   </span>
                 </span>
               </div>
@@ -607,10 +723,17 @@ export default function ExcelCategorizer() {
                 <th style={styles.th}>ID</th>
                 <th style={styles.th}>Значение</th>
                 <th style={styles.th}>Категория</th>
+                {columnNames.cost && <th style={styles.thSortable} onClick={() => requestSort('cost')}>{columnNames.cost}{getSortIcon('cost')}</th>}
+                {columnNames.region && <th style={styles.th}>{columnNames.region}</th>}
+                {columnNames.adNumber && <th style={styles.th}>{columnNames.adNumber}</th>}
+                {columnNames.lotNumber && <th style={styles.th}>{columnNames.lotNumber}</th>}
+                {columnNames.method && <th style={styles.th}>{columnNames.method}</th>}
+                {columnNames.source && <th style={styles.th}>{columnNames.source}</th>}
+                {columnNames.status && <th style={styles.th}>{columnNames.status}</th>}
               </tr>
             </thead>
             <tbody>
-              {categorizedData.map((item) => (
+              {displayedData.map((item) => (
                 <tr key={item.id}>
                   <td style={styles.td}>{item.id}</td>
                   <td style={styles.td}>{item.value}</td>
@@ -624,6 +747,13 @@ export default function ExcelCategorizer() {
                   >
                     <strong>{item.category || '—'}</strong>
                   </td>
+                  {columnNames.cost && <td style={styles.td}>{item.cost}</td>}
+                  {columnNames.region && <td style={styles.td}>{item.region}</td>}
+                  {columnNames.adNumber && <td style={styles.td}>{item.adNumber}</td>}
+                  {columnNames.lotNumber && <td style={styles.td}>{item.lotNumber}</td>}
+                  {columnNames.method && <td style={styles.td}>{item.method}</td>}
+                  {columnNames.source && <td style={styles.td}>{item.source}</td>}
+                  {columnNames.status && <td style={styles.td}>{item.status}</td>}
                 </tr>
               ))}
             </tbody>
@@ -673,7 +803,7 @@ const styles = {
     color: '#111827',
     margin: 0,
   },
-  main: { maxWidth: '1000px', margin: '2rem auto', padding: '0 1rem' },
+  main: { maxWidth: '1200px', margin: '2rem auto', padding: '0 1rem' }, // Increased width
   card: {
     background: 'white',
     borderRadius: '12px',
@@ -778,12 +908,12 @@ const styles = {
     fontWeight: '500',
   },
   tableContainer: {
-    maxHeight: '500px',
+    maxHeight: '600px', // Increased height
     overflowY: 'auto',
     border: '1px solid #e5e7eb',
     borderRadius: '8px',
   },
-  table: { width: '100%', borderCollapse: 'collapse' },
+  table: { width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' },
   th: {
     position: 'sticky',
     top: 0,
@@ -793,11 +923,27 @@ const styles = {
     borderBottom: '1px solid #e5e7eb',
     fontWeight: '600',
     color: '#374151',
+    whiteSpace: 'nowrap',
+  },
+  thSortable: {
+    position: 'sticky',
+    top: 0,
+    background: '#f9fafb',
+    padding: '0.75rem',
+    textAlign: 'left',
+    borderBottom: '1px solid #e5e7eb',
+    fontWeight: '600',
+    color: '#374151',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    whiteSpace: 'nowrap',
   },
   td: {
     padding: '0.75rem',
     borderBottom: '1px solid #e5e7eb',
     color: '#374151',
+    fontSize: '0.9rem',
   },
   errorBox: {
     margin: '0 0 1rem 0',
