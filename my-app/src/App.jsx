@@ -1,7 +1,7 @@
 // file: src/App.jsx
 
 import React, { useState, useMemo } from 'react';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { categorizeWithGemini } from './utils/openai';
 import {
   UploadCloud,
@@ -38,7 +38,6 @@ export default function ExcelCategorizer() {
   const [minCosts, setMinCosts] = useState({}); // { normalizedCategory: value }
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'ascending' });
   const [modalData, setModalData] = useState(null); // ✅ FIX: State for modal window
-  const cmToPx = cm => Math.round(cm * 37.7952755906);
 
 
   // Мемоизация цветовой схемы для категорий
@@ -343,21 +342,24 @@ export default function ExcelCategorizer() {
     const newWs = XLSX.utils.json_to_sheet(dataForExport);
 
     /* ====== 🆕 1. Ширина всех столбцов: 3.75 см ≈ 142 px ====== */
-    const colWidthPx = cmToPx(3.75);
+    const cmToPx = cm => Math.round(cm * 37.7952755906);
+    const colWidthPx = cmToPx(2.5);            // было 3.75
     newWs['!cols'] = Array.from(
       { length: Object.keys(dataForExport[0] || {}).length },
       () => ({ wpx: colWidthPx })
     );
 
-    newWs['!cols'][costColIdx] = { wpx: cmToPx(2.0) }; // 4.5 см
-
     /* ====== 🆕 2. Включаем wrapText, чтобы Excel сам тянул высоту ====== */
     Object.keys(newWs).forEach(addr => {
-      if (addr[0] === '!') return;          // пропускаем служебные ключи
+      if (addr[0] === '!') return;
       const cell = newWs[addr];
       cell.s = {
         ...(cell.s || {}),
-        alignment: { wrapText: true, vertical: 'top' }
+        alignment: { 
+          wrapText: true,      
+          horizontal: 'center',
+          vertical:   'center' 
+        }
       };
     });
 
