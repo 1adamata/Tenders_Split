@@ -1,5 +1,3 @@
-// file: src/App.jsx
-
 import React, { useState, useMemo } from 'react';
 import * as XLSX from 'xlsx-js-style';
 import { categorizeWithGemini } from './utils/openai';
@@ -37,73 +35,47 @@ export default function ExcelCategorizer() {
   });
   const [minCosts, setMinCosts] = useState({}); // { normalizedCategory: value }
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'ascending' });
-  const [modalData, setModalData] = useState(null); // ✅ FIX: State for modal window
-
+  const [modalData, setModalData] = useState(null);
+  const [cellHyperlinks, setCellHyperlinks] = useState({}); // Store hyperlinks by cell address
 
   // Мемоизация цветовой схемы для категорий
   const categoryColors = useMemo(
     () => ({
-      'айти': '#d1fae5', // green-100
-      'телеком': '#cffafe', // cyan-100
-      'инф.структура': '#fef9c3', // yellow-100
-      'строительство/ремонт': '#fef08a', // yellow-200
-      'оборудование': '#e5e7eb', // gray-200
-      'по/лицензии': '#ccfbf1', // teal-100
-      'транспорт/логистика': '#fed7aa', // orange-200
-      'канцтовары/хозтовары': '#fbcfe8', // pink-200
-      'одежда/сиз': '#dbeafe', // blue-200
-      'услуги (прочее)': '#e9d5ff', // purple-200
-      'прочее': '#fee2e2', // red-100
+      'айти': '#d1fae5',
+      'телеком': '#cffafe',
+      'инф.структура': '#fef9c3',
+      'строительство/ремонт': '#fef08a',
+      'оборудование': '#e5e7eb',
+      'по/лицензии': '#ccfbf1',
+      'транспорт/логистика': '#fed7aa',
+      'канцтовары/хозтовары': '#fbcfe8',
+      'одежда/сиз': '#dbeafe',
+      'услуги (прочее)': '#e9d5ff',
+      'прочее': '#fee2e2',
     }),
     [],
   );
 
-  // Функция для генерации примера файла
-  const generateSample = () => {
-    const sampleData = [
-      {
-        Компания: 'TechSoft',
-        Регион: 'Москва',
-        Описание: 'Разработка ИИ',
-        Стоимость: 5000,
-        Категория: 'айти',
-        '№ объявления': 'AD-123',
-        '№ лота': 'LOT-456',
-        'Способ проведения': 'Аукцион',
-        Источник: 'Портал закупок',
-        Статус: 'Активна',
-      },
-      {
-        Компания: 'Telecom Plus',
-        Регион: 'Нью-Йорк',
-        Описание: 'Сети 5G',
-        Стоимость: 12000,
-        Категория: 'телеком',
-        '№ объявления': 'AD-124',
-        '№ лота': 'LOT-457',
-        'Способ проведения': 'Конкурс',
-        Источник: 'Сайт компании',
-        Статус: 'Завершена',
-      },
-      {
-        Компания: 'DataSecure',
-        Регион: 'Берлин',
-        Описание: 'Кибербезопасность',
-        Стоимость: 7500,
-        Категория: 'инф.структура',
-        '№ объявления': 'AD-125',
-        '№ лота': 'LOT-458',
-        'Способ проведения': 'Запрос котировок',
-        Источник: 'Гос. закупки',
-        Статус: 'Активна',
-      },
-    ];
+  // После мемоизации categoryColors добавьте описания категорий
+  const categoryDescriptions = useMemo(
+    () => ({
+      'айти': 'Информационные технологии: разработка ПО, системная интеграция, техническая поддержка, облачные решения, кибербезопасность',
+      'телеком': 'Телекоммуникации: услуги связи, интернет-провайдинг, мобильная связь, спутниковая связь, IP-телефония',
+      'инф.структура': 'Информационная инфраструктура: серверное оборудование, сетевое оборудование, системы хранения данных, ЦОДы',
+      'строительство/ремонт': 'Строительные работы и ремонт: капитальное строительство, ремонтные работы, отделочные материалы, строительные услуги',
+      'оборудование': 'Различное оборудование: промышленное, медицинское, офисное, технологическое оборудование и техника',
+      'по/лицензии': 'Программное обеспечение и лицензии: покупка лицензий, подписки на ПО, обновления программ, антивирусы',
+      'транспорт/логистика': 'Транспортные услуги и логистика: грузоперевозки, пассажирские перевозки, складские услуги, курьерская доставка',
+      'канцтовары/хозтовары': 'Канцелярские и хозяйственные товары: офисные принадлежности, бумага, моющие средства, хозяйственный инвентарь',
+      'одежда/сиз': 'Одежда и средства индивидуальной защиты: спецодежда, защитная экипировка, униформа, обувь',
+      'услуги (прочее)': 'Прочие услуги: консалтинг, юридические услуги, бухгалтерские услуги, маркетинг, обучение персонала',
+      'прочее': 'Прочие товары и услуги: товары, не попадающие в другие категории, разные виды работ и поставок'
+    }),
+    [],
+  );
 
-    const ws = XLSX.utils.json_to_sheet(sampleData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Пример');
-    XLSX.writeFile(wb, 'gemini-categorizer-шаблон.xlsx');
-  };
+  // Состояние для управления tooltip
+  const [tooltipVisible, setTooltipVisible] = useState(null);
 
   // --- Основная логика ---
 
@@ -119,12 +91,26 @@ export default function ExcelCategorizer() {
     reader.onload = (evt) => {
       try {
         const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
+        // Read with all options to preserve hyperlinks
+        const wb = XLSX.read(bstr, { 
+          type: 'binary',
+          cellHTML: true,
+          cellText: true,
+          cellStyles: true,
+          cellFormulas: true,
+          cellDates: true,
+          cellNF: true,
+          sheetStubs: true,
+          bookVBA: true
+        });
         setWorkbook(wb);
         setSheetNames(wb.SheetNames);
         setSelectedSheet(wb.SheetNames[0] || '');
         if (wb.SheetNames[0]) {
           extractHeaders(wb, wb.SheetNames[0]);
+          extractHyperlinks(wb, wb.SheetNames[0]);
+          // Автоматически устанавливаем столбец "Название"
+          autoSelectNazvanieColumn(wb, wb.SheetNames[0]);
         }
       } catch (err) {
         console.error('Ошибка чтения файла:', err);
@@ -141,11 +127,58 @@ export default function ExcelCategorizer() {
     setHeaders(firstRow || []);
   };
 
+  // Новая функция для автоматического выбора столбца "Название"
+  const autoSelectNazvanieColumn = (wb, sheetName) => {
+    const ws = wb.Sheets[sheetName];
+    const firstRow = XLSX.utils.sheet_to_json(ws, { header: 1, range: 0 })[0] || [];
+    
+    // Ищем столбец "Название" (с учетом регистра и пробелов)
+    const nazvanieColumn = firstRow.find(header => 
+      normalize(header) === 'название'
+    );
+    
+    if (nazvanieColumn) {
+      setSelectedColumn(nazvanieColumn);
+    } else {
+      setError('❌ В файле не найден столбец "Название". Убедитесь, что такой столбец существует.');
+    }
+  };
+
+  // Extract all hyperlinks from the worksheet
+  const extractHyperlinks = (wb, sheetName) => {
+    const ws = wb.Sheets[sheetName];
+    const hyperlinks = {};
+    
+    // Iterate through all cells
+    Object.keys(ws).forEach(address => {
+      if (address[0] !== '!') { // Skip metadata
+        const cell = ws[address];
+        // Check for hyperlink in cell
+        if (cell.l && cell.l.Target) {
+          hyperlinks[address] = cell.l.Target;
+        }
+        // Also check for HYPERLINK formula
+        if (cell.f && cell.f.toLowerCase().includes('hyperlink')) {
+          // Extract URL from HYPERLINK formula
+          const match = cell.f.match(/HYPERLINK\s*\(\s*["']([^"']+)["']/i);
+          if (match) {
+            hyperlinks[address] = match[1];
+          }
+        }
+      }
+    });
+    
+    setCellHyperlinks(hyperlinks);
+    console.log(`Extracted ${Object.keys(hyperlinks).length} hyperlinks from ${sheetName}`);
+  };
+
   const handleSheetChange = (e) => {
     const newSheet = e.target.value;
     setSelectedSheet(newSheet);
     extractHeaders(workbook, newSheet);
-    setSelectedColumn('');
+    extractHyperlinks(workbook, newSheet);
+    // Автоматически устанавливаем столбец "Название" при смене листа
+    autoSelectNazvanieColumn(workbook, newSheet);
   };
 
   const startCategorization = async () => {
@@ -201,7 +234,7 @@ export default function ExcelCategorizer() {
         const response = await categorizeWithGemini(chunk);
         if (Array.isArray(response)) {
           const mapped = response.map((res, idx) => ({
-            id: chunk[idx].id,            // глобальный id из исходного куска
+            id: chunk[idx].id,
             category: res.category?.trim() || ''
           }));
           allResults.push(...mapped);
@@ -229,6 +262,17 @@ export default function ExcelCategorizer() {
       Категория: categoryMap.get(index + 1) || '',
     }));
   }, [categorizedData, originalSheetData]);
+
+  // Get hyperlink for a specific row and column
+  const getHyperlinkForCell = (rowIndex, columnName) => {
+    const colIndex = headers.indexOf(columnName);
+    if (colIndex === -1) return null;
+    
+    const colLetter = XLSX.utils.encode_col(colIndex);
+    const cellAddress = colLetter + (rowIndex + 2); // +2 because row 1 is headers, and Excel is 1-indexed
+    
+    return cellHyperlinks[cellAddress] || null;
+  };
 
   const displayedData = useMemo(() => {
     const findHeader = (aliases) => headers.find(h => aliases.some(alias => normalize(h) === alias));
@@ -268,18 +312,24 @@ export default function ExcelCategorizer() {
       });
     }
     
-    let mappedData = filteredData.map(row => ({
-      id: row.id,
-      value: row[selectedColumn],
-      category: row['Категория'],
-      cost: columnNames.cost ? row[columnNames.cost] : undefined,
-      region: columnNames.region ? row[columnNames.region] : undefined,
-      adNumber: columnNames.adNumber ? row[columnNames.adNumber] : undefined,
-      lotNumber: columnNames.lotNumber ? row[columnNames.lotNumber] : undefined,
-      method: columnNames.method ? row[columnNames.method] : undefined,
-      source: columnNames.source ? row[columnNames.source] : undefined,
-      status: columnNames.status ? row[columnNames.status] : undefined,
-    }));
+    let mappedData = filteredData.map(row => {
+      // Get hyperlink for the selected column
+      const link = getHyperlinkForCell(row.id - 1, selectedColumn);
+      
+      return {
+        id: row.id,
+        value: row[selectedColumn],
+        link: link,
+        category: row['Категория'],
+        cost: columnNames.cost ? row[columnNames.cost] : undefined,
+        region: columnNames.region ? row[columnNames.region] : undefined,
+        adNumber: columnNames.adNumber ? row[columnNames.adNumber] : undefined,
+        lotNumber: columnNames.lotNumber ? row[columnNames.lotNumber] : undefined,
+        method: columnNames.method ? row[columnNames.method] : undefined,
+        source: columnNames.source ? row[columnNames.source] : undefined,
+        status: columnNames.status ? row[columnNames.status] : undefined,
+      };
+    });
 
     if (sortConfig.key) {
       mappedData.sort((a, b) => {
@@ -302,15 +352,14 @@ export default function ExcelCategorizer() {
     }
 
     return mappedData;
-  }, [dataWithCategories, filters, minCosts, headers, selectedColumn, sortConfig]);
-
+  }, [dataWithCategories, filters, minCosts, headers, selectedColumn, sortConfig, cellHyperlinks]);
 
   const exportToExcel = () => {
     if (!workbook || !originalSheetData.length) return;
 
     let filteredData = dataWithCategories;
 
-    /* ----------- фильтры регионов и категорий (как было) ------------ */
+    // Apply filters
     if (filters.regions.length > 0) {
       const regionColumn = headers.find(h => normalize(h).includes('регион'));
       if (regionColumn) {
@@ -337,44 +386,87 @@ export default function ExcelCategorizer() {
       });
     }
 
-    /* ----------------- формируем worksheet ----------------- */
-    const dataForExport = filteredData.map(({ id, ...rest }) => rest);  // убираем id
+    // Create new worksheet
+    const dataForExport = filteredData.map(({ id, ...rest }) => rest);
     const newWs = XLSX.utils.json_to_sheet(dataForExport);
 
-    /* ====== 🆕 1. Ширина всех столбцов: 3.75 см ≈ 142 px ====== */
+    // Copy hyperlinks from original worksheet
+    const wsOrig = workbook.Sheets[selectedSheet];
+    
+    // Iterate through all columns to preserve hyperlinks
+    headers.forEach((header, colIndex) => {
+      const colLetter = XLSX.utils.encode_col(colIndex);
+      
+      filteredData.forEach((row, rowIndex) => {
+        const origRowNum = row.id + 1; // Excel row in original sheet (1-based)
+        const origCellAddress = colLetter + origRowNum;
+        const newCellAddress = colLetter + (rowIndex + 2); // New row in export (1-based, +1 for header)
+        
+        // Get original cell
+        const origCell = wsOrig[origCellAddress];
+        
+        // If original cell has hyperlink, copy it to new cell
+        if (origCell && origCell.l && origCell.l.Target) {
+          if (!newWs[newCellAddress]) {
+            newWs[newCellAddress] = { t: 's', v: row[header] || '' };
+          }
+          newWs[newCellAddress].l = { Target: origCell.l.Target };
+          
+          // If there's tooltip text, preserve it
+          if (origCell.l.Tooltip) {
+            newWs[newCellAddress].l.Tooltip = origCell.l.Tooltip;
+          }
+        }
+        
+        // Also check for HYPERLINK formulas
+        if (origCell && origCell.f && origCell.f.toLowerCase().includes('hyperlink')) {
+          if (!newWs[newCellAddress]) {
+            newWs[newCellAddress] = { t: 's', v: row[header] || '' };
+          }
+          // Copy the formula
+          newWs[newCellAddress].f = origCell.f;
+        }
+      });
+    });
+
+    // Set column widths (2.5 cm ≈ 94 px)
     const cmToPx = cm => Math.round(cm * 37.7952755906);
-    const colWidthPx = cmToPx(2.5);            // было 3.75
+    const colWidthPx = cmToPx(2.5);
     newWs['!cols'] = Array.from(
-      { length: Object.keys(dataForExport[0] || {}).length },
+      { length: headers.length },
       () => ({ wpx: colWidthPx })
     );
 
-    /* ====== 🆕 2. Включаем wrapText, чтобы Excel сам тянул высоту ====== */
+    // Apply text wrapping to all cells
     Object.keys(newWs).forEach(addr => {
       if (addr[0] === '!') return;
       const cell = newWs[addr];
       cell.s = {
         ...(cell.s || {}),
         alignment: { 
-          wrapText: true,      
+          wrapText: true,
           horizontal: 'center',
-          vertical:   'center' 
+          vertical: 'center' 
         }
       };
     });
 
-    /* ====== 🆕 3. (не задаём !rows.hpx) Excel сам подстроит высоту ====== */
-
-    /* ----------- переносим стиль из оригинального листа (как было) ---- */
+    // Copy merges if they exist
     const originalWs = workbook.Sheets[selectedSheet];
-    ['!merges'].forEach(prop => {           // колонки/строки мы уже задали вручную
-      if (originalWs[prop]) newWs[prop] = originalWs[prop];
-    });
+    if (originalWs['!merges']) {
+      newWs['!merges'] = originalWs['!merges'];
+    }
 
-    /* ----------------- сохраняем файл ----------------- */
+    // Create and save workbook
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, newWs, 'Отфильтрованные_данные');
-    XLSX.writeFile(wb, `отфильтрованный_${fileName}`);
+    
+    // Use write with bookType to ensure hyperlinks are preserved
+    XLSX.writeFile(wb, `отфильтрованный_${fileName}`, { 
+      bookType: 'xlsx',
+      bookSST: true,
+      type: 'binary'
+    });
   };
 
   const resetState = () => {
@@ -391,7 +483,8 @@ export default function ExcelCategorizer() {
     setMinCosts({});
     setFilters({ regions: [], categories: [] });
     setSortConfig({ key: null, direction: 'ascending' });
-    setModalData(null); // ✅ FIX: Reset modal state
+    setModalData(null);
+    setCellHyperlinks({});
     if (document.getElementById('file-upload-input')) {
         document.getElementById('file-upload-input').value = '';
     }
@@ -415,7 +508,7 @@ export default function ExcelCategorizer() {
     return <ArrowDown size={14} style={{ marginLeft: '4px' }} />;
   };
 
-  // ✅ FIX: Handlers for modal
+  // Handlers for modal
   const handleRowClick = (item) => {
     setModalData(item);
   };
@@ -488,23 +581,20 @@ export default function ExcelCategorizer() {
         </div>
 
         <div style={styles.formGroup}>
-          <label style={styles.formLabel} htmlFor="column-select">
-            <ChevronsRight size={16} /> Выберите столбец для категоризации
+          <label style={styles.formLabel}>
+            <ChevronsRight size={16} /> Столбец для категоризации
           </label>
-          <select
-            id="column-select"
-            value={selectedColumn}
-            onChange={(e) => setSelectedColumn(e.target.value)}
-            style={styles.select}
-            disabled={!selectedSheet}
-          >
-            <option value="">-- Выберите столбец --</option>
-            {headers.map((header) => (
-              <option key={header} value={header}>
-                {header}
-              </option>
-            ))}
-          </select>
+          <div style={styles.selectedColumnDisplay}>
+            {selectedColumn ? (
+              <span style={styles.selectedColumnText}>
+              ✓ {selectedColumn}
+              </span>
+            ) : (
+              <span style={styles.noColumnText}>
+              ❌ Столбец "Название" не найден
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -555,7 +645,7 @@ export default function ExcelCategorizer() {
       ),
     );
     
-    const findHeader = (aliases) => headers.find(h => aliases.some(alias => normalize(h) === alias));
+    const findHeader = (aliases) => headers.find(h => aliases.some(alias => normalize(h) === alias)) || aliases[0];
     
     const columnNames = {
       cost: findHeader(['стоимость']),
@@ -707,13 +797,6 @@ export default function ExcelCategorizer() {
 
         <div style={styles.enhancementsSection}>
           <div style={styles.enhancementItem}>
-            <button onClick={generateSample} style={styles.sampleButton}>
-              <FileText size={16} style={{ marginRight: '8px' }} />
-              Скачать шаблон
-            </button>
-          </div>
-
-          <div style={styles.enhancementItem}>
             <div style={styles.statsBox}>
               <div style={styles.statItem}>
                 <span style={styles.statLabel}>Всего строк:</span>
@@ -740,19 +823,27 @@ export default function ExcelCategorizer() {
               {Object.entries(categoryCounts)
                 .sort((a, b) => b[1] - a[1])
                 .map(([category, count]) => (
-                  <button
-                    key={category}
-                    onClick={() =>
-                      setFilters({ ...filters, categories: [normalize(category)] })
-                    }
-                    style={{
-                      ...styles.quickFilterButton,
-                      backgroundColor:
-                        categoryColors[normalize(category)] || '#e2e8f0',
-                    }}
-                  >
-                    {category} ({count})
-                  </button>
+                  <div key={category} style={styles.quickFilterWrapper}>
+                    <button
+                      onClick={() =>
+                        setFilters({ ...filters, categories: [normalize(category)] })
+                      }
+                      onMouseEnter={() => setTooltipVisible(category)}
+                      onMouseLeave={() => setTooltipVisible(null)}
+                      style={{
+                        ...styles.quickFilterButton,
+                        backgroundColor:
+                          categoryColors[normalize(category)] || '#e2e8f0',
+                      }}
+                    >
+                      {category} ({count})
+                    </button>
+                    {tooltipVisible === category && (
+                      <div style={styles.tooltip}>
+                        {categoryDescriptions[normalize(category)] || 'Описание недоступно'}
+                      </div>
+                    )}
+                  </div>
                 ))}
             </div>
           </div>
@@ -805,7 +896,7 @@ export default function ExcelCategorizer() {
     );
   };
 
-  // ✅ FIX: Modal window component
+  // Modal window component
   const renderModal = () => {
     if (!modalData) return null;
 
@@ -832,16 +923,25 @@ export default function ExcelCategorizer() {
                 </div>
                 <div style={styles.modalBody}>
                     {Object.entries(modalData).map(([key, value]) => {
-                        if (key === 'id' || value === undefined) return null;
-                        
-                        const title = displayTitles[key] || key;
+                      if (key === 'id' || key === 'link' || value === undefined) return null;
 
-                        return (
-                            <div key={key} style={styles.modalDetailRow}>
-                                <strong style={styles.modalDetailKey}>{title}:</strong>
-                                <span style={styles.modalDetailValue}>{value}</span>
-                            </div>
-                        );
+                      const title = displayTitles[key] || key;
+
+                      return (
+                        <div key={key} style={styles.modalDetailRow}>
+                          <strong style={styles.modalDetailKey}>{title}:</strong>
+                          <span style={styles.modalDetailValue}>
+                            {/* Display value as hyperlink if we have a link */}
+                            {key === 'value' && modalData.link ? (
+                              <a href={modalData.link} target="_blank" rel="noopener noreferrer" style={styles.modalLink}>
+                                {value}
+                              </a>
+                            ) : (
+                              value
+                            )}
+                          </span>
+                        </div>
+                      );
                     })}
                 </div>
             </div>
@@ -1214,6 +1314,41 @@ const styles = {
       transform: 'translateY(-1px)'
     }
   },
+  quickFilterWrapper: {
+    position: 'relative',
+    display: 'inline-block'
+  },
+  tooltip: {
+    position: 'absolute',
+    bottom: '100%',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    backgroundColor: '#1f2937',
+    color: 'white',
+    padding: '12px 16px',
+    borderRadius: '8px',
+    fontSize: '13px',
+    lineHeight: '1.4',
+    maxWidth: '300px',
+    minWidth: '250px',
+    whiteSpace: 'normal',
+    textAlign: 'center',
+    zIndex: 1000,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+    marginBottom: '8px',
+    // Стрелочка снизу
+    '::after': {
+      content: '""',
+      position: 'absolute',
+      top: '100%',
+      left: '50%',
+      marginLeft: '-6px',
+      borderWidth: '6px',
+      borderStyle: 'solid',
+      borderColor: '#1f2937 transparent transparent transparent'
+    }
+  },
+
   // ✅ FIX: Styles for modal
   modalOverlay: {
     position: 'fixed',

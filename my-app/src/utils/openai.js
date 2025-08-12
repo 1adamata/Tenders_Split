@@ -30,28 +30,40 @@ export async function categorizeWithGemini(data) {
     ],
   });
 
-  // ✅ FIX: Updated the prompt to be much stricter and include few-shot examples.
+  // ✅ FIX: Updated the prompt to include detailed category descriptions
   const prompt = `
     You are an expert procurement analyst. Your task is to categorize procurement items based on their description.
     Analyze the following entries and assign each one to the most appropriate category.
 
     Your response must be a valid JSON array where each object has an "id" (number), "value" (string), and "category" (string).
 
-    ## CATEGORY LIST
-    IMPORTANT: The "category" value MUST be one of the exact strings from this list: ["айти", "телеком", "инф.структура", "строительство/ремонт", "оборудование", "по/лицензии", "транспорт/логистика", "канцтовары/хозтовары", "одежда/сиз", "услуги (прочее)", "прочее"].
+    ## CATEGORY LIST & DETAILED DESCRIPTIONS
+    IMPORTANT: The "category" value MUST be one of the exact strings from this list:
 
-    ## INSTRUCTIONS & DEFINITIONS
-    - "инф.структура" is for network hardware, servers, data centers.
-    - "строительство/ремонт" is for any construction, renovation, road work, and related works.
-    - "по/лицензии" is for software and licenses.
-    - "одежда/сиз" is for clothing and personal protective equipment.
-    - If you cannot determine a suitable category from the list, you MUST use "прочее". Do not leave the category blank or create new categories.
+    - "айти": Информационные технологии: разработка ПО, системная интеграция, техническая поддержка, облачные решения, кибербезопасность
+    - "телеком": Телекоммуникации: услуги связи, интернет-провайдинг, мобильная связь, спутниковая связь, IP-телефония
+    - "инф.структура": Информационная инфраструктура: серверное оборудование, сетевое оборудование, системы хранения данных, ЦОДы
+    - "строительство/ремонт": Строительные работы и ремонт: капитальное строительство, ремонтные работы, отделочные материалы, строительные услуги
+    - "оборудование": Различное оборудование: промышленное, медицинское, офисное, технологическое оборудование и техника
+    - "по/лицензии": Программное обеспечение и лицензии: покупка лицензий, подписки на ПО, обновления программ, антивирусы
+    - "транспорт/логистика": Транспортные услуги и логистика: грузоперевозки, пассажирские перевозки, складские услуги, курьерская доставка
+    - "канцтовары/хозтовары": Канцелярские и хозяйственные товары: офисные принадлежности, бумага, моющие средства, хозяйственный инвентарь
+    - "одежда/сиз": Одежда и средства индивидуальной защиты: спецодежда, защитная экипировка, униформа, обувь
+    - "услуги (прочее)": Прочие услуги: консалтинг, юридические услуги, бухгалтерские услуги, маркетинг, обучение персонала
+    - "прочее": Прочие товары и услуги: товары, не попадающие в другие категории, разные виды работ и поставок
+
+    ## INSTRUCTIONS
+    - If you cannot determine a suitable category from the list above, you MUST use "прочее"
+    - Do not leave the category blank or create new categories
+    - Use the detailed descriptions above to make accurate categorizations
 
     ## EXAMPLES
     - Input value: "Работы по возведению (строительству) нежилых зданий/сооружений" -> Output category: "строительство/ремонт"
     - Input value: "Работы по среднему ремонту автомобильной дороги" -> Output category: "строительство/ремонт"
     - Input value: "Сервер HPE ProLiant" -> Output category: "инф.структура"
     - Input value: "Лицензия на антивирус" -> Output category: "по/лицензии"
+    - Input value: "Разработка мобильного приложения" -> Output category: "айти"
+    - Input value: "Услуги мобильной связи" -> Output category: "телеком"
 
     ## DATA TO CATEGORIZE
     Here is the data to categorize:
